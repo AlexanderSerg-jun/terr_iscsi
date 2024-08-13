@@ -1,0 +1,22 @@
+---
+- name: Install and Confifuration Basics
+  hosts: all
+  gather_facts: true
+  become: true
+  roles:
+    - config_base      
+  
+- name: Install and confifuration ISCSI
+  hosts: all
+  gather_facts: true
+  become: true
+  roles:
+    - setup_iscsi
+
+- name: Configure Pacemaker Cluster
+  hosts: all
+  gather_facts: true
+  become: true
+  roles:
+    - setup_pacemaker_cluster
+...

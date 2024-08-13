@@ -1,0 +1,129 @@
+---
+- meta: end_play
+  when: (ansible_distribution != "CentOS" and ansible_distribution_major_version != "7")
+
+- name: Install epel-release
+  yum:
+    name: "{{ packages }}"
+    state: present
+  vars:
+    packages:
+    - epel-release
+
+
+
+- name: Force timesync with chrony
+  shell: "chronyc -a makestep"
+
+- name: Install Additional Packages For ISCSI Server
+  yum:
+    name: "{{ packages }}"
+    state: present
+  vars:
+    packages:
+    - targetcli
+  when: ansible_hostname == 'iscsi-1'
+
+- name: Install Additional Packages For Pacemaker Servers
+  yum:
+    name: "{{ packages }}"
+    state: present
+  vars:
+    packages:
+    - device-mapper-multipath
+    - iscsi-initiator-utils
+    - iscsi-initiator-utils-iscsiuio
+    - pcs 
+    - pacemaker
+    - gfs2-utils
+    - lvm2-cluster
+    - fence-agents-all
+    - resource-agents
+    - policycoreutils-python
+    - corosync
+    - psmisc
+    - policycoreutils-python
+    - expect
+  when: ansible_hostname is match("pcs-server-*")
+
+- name: Start and Enable PCSD
+  systemd:
+    name: "{{ item }}"
+    state: started
+    enabled: true
+  with_items:
+      - pcsd
+  when: ansible_hostname is match("pcs-server-*")
+
+- name: Enable Corosync and Pacemaker Services
+  systemd:
+    name: "{{ item }}"
+    enabled: true
+  with_items:
+      - corosync
+      - pacemaker
+  when: ansible_hostname is match("pcs-server-*")
+
+- name: Enable and Start Target Service
+  systemd:
+    name: "{{ item }}"
+    state: started
+    enabled: true
+  with_items:
+      - target
+  when: ansible_hostname == 'iscsi-1'
+
+- name: Change password hacluster user
+  user:
+        name: hacluster
+        update_password: always
+        password: "{{ newpassword|password_hash('sha512') }}"
+        create_home: yes
+  when: ansible_hostname is match("pcs-server-*")
+  notify:
+  - Restart PCSD
+
+- name: Change initiator name in pcs host 1
+  shell: sed -i "s/:.*/:pcs-server-1/g" /etc/iscsi/initiatorname.iscsi
+  when: ansible_hostname == 'pcs-server-1'
+
+- name: Change initiator name in pcs host 2
+  shell: sed -i "s/:.*/:pcs-server-2/g" /etc/iscsi/initiatorname.iscsi
+  when: ansible_hostname == 'pcs-server-2'
+ 
+- name: Change initiator name in pcs host 3
+  shell: sed -i "s/:.*/:pcs-server-3/g" /etc/iscsi/initiatorname.iscsi
+  when: ansible_hostname == 'pcs-server-3'
+
+- name: Put SELinux in permissive mode, logging actions that would be blocked.
+  ansible.posix.selinux:
+    policy: targeted
+    state: permissive
+
+- name: Add mappings to /etc/hosts
+  blockinfile:
+    path: /etc/hosts
+    block: |
+      {{ item.ip }} {{ item.name }}
+    marker: "# {mark} ANSIBLE MANAGED BLOCK {{ item.name }}"
+  loop:
+    - { name: pcs-server-1, ip: 172.18.2.201 }
+    - { name: pcs-server-2, ip: 172.18.2.202 }
+    - { name: pcs-server-3, ip: 172.18.2.203 }
+  tags:
+      - hosts
+  when: ansible_hostname is match("pcs-server-*")
+
+- name: Add to LVM Confifuration File (Filter)
+  lineinfile:
+    dest: "/etc/lvm/lvm.conf"
+    insertafter: 'devices {'
+    line: '{{ item }}'
+  with_items:
+    - 'global_filter=["a|/dev/mapper/yellow.*|","a|/dev/mapper/mpath.*|","a|/dev/sda.*|","r|.*|"]'
+    - 'filter=["a|/dev/mapper/yellow.*|","a|/dev/mapper/mpath.*|","a|/dev/sda.*|","r|.*|"]'
+  tags: LVM Filter
+  when: ansible_hostname is match("pcs-server-*")
+
+- meta: flush_handlers
+ 

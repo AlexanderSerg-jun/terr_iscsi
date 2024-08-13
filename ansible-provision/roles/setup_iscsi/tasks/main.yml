@@ -1,0 +1,58 @@
+---
+  - name: Setup targetcli
+    shell: |
+         targetcli /backstores/block create disk01 /dev/vdb
+         targetcli /iscsi create iqn.2022-05.ru.otus:storage-iscsi-1.target00
+         targetcli /iscsi/iqn.2022-05.ru.otus:storage-iscsi-1.target00/tpg1/portals create 0.0.0.0
+         targetcli /iscsi/iqn.2022-05.ru.otus:storage-iscsi-1.target00/tpg1/luns create /backstores/block/disk01 lun=1
+         targetcli /iscsi/iqn.2022-05.ru.otus:storage-iscsi-1.target00/tpg1 set attribute authentication=0
+         targetcli /iscsi/iqn.2022-05.ru.otus:storage-iscsi-1.target00/tpg1 set auth userid=otus
+         targetcli /iscsi/iqn.2022-05.ru.otus:storage-iscsi-1.target00/tpg1 set auth password=otus
+         targetcli /iscsi/iqn.2022-05.ru.otus:storage-iscsi-1.target00/tpg1/acls create iqn.1994-05.com.redhat:pcs-server-1
+         targetcli /iscsi/iqn.2022-05.ru.otus:storage-iscsi-1.target00/tpg1/acls create iqn.1994-05.com.redhat:pcs-server-2
+         targetcli /iscsi/iqn.2022-05.ru.otus:storage-iscsi-1.target00/tpg1/acls create iqn.1994-05.com.redhat:pcs-server-3
+         targetcli saveconfig
+    when: ansible_hostname == 'iscsi-1'
+
+  - name: Connect iscsi in PCS Servers
+    shell: |
+         iscsiadm -m discovery -t st -p 10.179.1.204
+         iscsiadm -m discovery -t st -p 10.179.2.204
+         iscsiadm -m node -l -T iqn.2022-05.ru.otus:storage-iscsi-1.target00
+    when: ansible_hostname is match("pcs-server-*")
+
+  - name: "Enable and Start ISCSI Service"
+    systemd:
+      name: "{{ item }}"
+      state: started
+      enabled: true
+    with_items:
+      - iscsi
+    when: ansible_hostname is match("pcs-server-*")
+
+  - name: Setup multipath in PCS Servers
+    shell: |
+        mpathconf --enable --with_multipathd y 
+    when: ansible_hostname is match("pcs-server-*")
+
+  - name: Copy multipath conf file
+    ansible.builtin.copy:
+      src: ./roles/setup_iscsi/files/multipath.conf
+      dest: /etc/multipath.conf
+      follow: yes
+    when: ansible_hostname is match("pcs-server-*")
+
+  - name: Setup multipath in PCS Servers
+    shell: |
+        wwid=`/usr/lib/udev/scsi_id --whitelisted --replace-whitespace --device=/dev/sda`
+        sed -i "s/wwid*.*/wwid $wwid/g" /etc/multipath.conf
+    when: ansible_hostname is match("pcs-server-*")
+
+  - name: "Enable and Start Multipathd Service"
+    systemd:
+      name: "{{ item }}"
+      state: restarted
+      enabled: true
+    with_items:
+      - multipathd
+    when: ansible_hostname is match("pcs-server-*")

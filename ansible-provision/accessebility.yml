@@ -1,0 +1,21 @@
+ - hosts: all
+   become: true
+   gather_facts: false
+   tasks:
+     - name: Check SSL connection
+       local_action:
+           shell ssh -o UserKnownHostsFile=/dev/null -o \
+           StrictHostKeyChecking=no {{ ansible_user }}@{{ inventory_hostname }} \
+           "echo success, you can run Ansible Playbook"
+       register: ssh_enabled
+       until: ssh_enabled.rc == 0
+       become: false
+       retries: 20
+       delay: 10
+       notify:
+       - Print message
+       
+   handlers:
+     - name: Print message
+       debug:
+         msg: You can run Ansible Playbook

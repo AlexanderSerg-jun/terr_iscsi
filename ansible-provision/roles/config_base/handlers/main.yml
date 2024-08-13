@@ -1,0 +1,11 @@
+--- 
+- name: Restart PCSD
+  systemd:
+    name: "{{ item }}"
+    state: restarted
+    enabled: true
+  with_items:
+      - pcsd
+  when: ansible_hostname is match("pcs-server-*")
+...
+
